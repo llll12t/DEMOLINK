@@ -22,9 +22,9 @@
         
         <!-- Input Fields for Search -->
         <div class="flex space-x-4 mb-6">
-            <input id="userFilter" type="text" placeholder="กรองผู้ใช้" class="border rounded-md p-2 w-full" />
-            <input id="licenseFilter" type="text" placeholder="กรองเลขทะเบียน" class="border rounded-md p-2 w-full" />
-            <input id="dateFilter" type="date" class="border rounded-md p-2" />
+            <input type="text" placeholder="กรองผู้ใช้" class="border rounded-md p-2 w-full" />
+            <input type="text" placeholder="กรองเลขทะเบียน" class="border rounded-md p-2 w-full" />
+            <input type="date" class="border rounded-md p-2" />
         </div>
 
         <!-- Loading Spinner -->
@@ -58,7 +58,6 @@
         const updateStatusUrl = `${WEB_APP_URL}?action=updateStatus`;
 
         let requestData = [];
-        let filteredData = [];
         let currentPage = 1;
         const rowsPerPage = 10;
 
@@ -70,10 +69,8 @@
                 .then(response => response.json())
                 .then(data => {
                     requestData = data.slice(1); // Skip header row
-                    console.log(requestData); // Check the data structure
-                    filteredData = requestData; // Set filteredData to the full dataset initially
-                    renderTable(filteredData);
-                    renderPagination(filteredData);
+                    renderTable(requestData);
+                    renderPagination(requestData);
                     
                     document.getElementById('loadingSpinner').style.display = 'none';
                     document.getElementById('tableContainer').classList.remove('hidden');
@@ -82,29 +79,6 @@
                     console.error('Error fetching data:', error);
                     document.getElementById('loadingSpinner').style.display = 'none';
                 });
-        }
-
-        // Function to filter data based on inputs
-        function filterData() {
-            const userFilterValue = document.getElementById('userFilter').value.toLowerCase();
-            const licenseFilterValue = document.getElementById('licenseFilter').value.toLowerCase();
-            const dateFilterValue = document.getElementById('dateFilter').value;
-
-            filteredData = requestData.filter(row => {
-                const userName = row[1] ? row[1].toLowerCase() : ''; // Ensure row[1] exists
-                const licensePlate = row[2] ? row[2].toLowerCase() : ''; // Ensure row[2] exists
-                const dateValue = row[6] ? row[6].split('T')[0] : ''; // Ensure row[6] exists
-
-                const matchesUser = userFilterValue === '' || userName.includes(userFilterValue); // Match only if search is not empty
-                const matchesLicense = licenseFilterValue === '' || licensePlate.includes(licenseFilterValue); // Match only if search is not empty
-                const matchesDate = dateFilterValue === '' || dateValue === dateFilterValue; // Match only if date is selected
-
-                return matchesUser && matchesLicense && matchesDate;
-            });
-
-            currentPage = 1; // Reset to first page after filtering
-            renderTable(filteredData);
-            renderPagination(filteredData);
         }
 
         // Render the table with paginated data
@@ -124,7 +98,7 @@
                 const status = row[10]; // Status column
 
                 const tr = document.createElement('tr');
-                tr.classList.add('border-b', 'text-center');
+                tr.classList.add('border-b','border-b');
 
                 tr.innerHTML = `
                     <td class="px-2 py-1">${row[1]}</td> <!-- User name -->
@@ -205,13 +179,44 @@
         // Go to a specific page
         function goToPage(page) {
             currentPage = page;
-            renderTable(filteredData);
-            renderPagination(filteredData);
+            renderTable(requestData);
+            renderPagination(requestData);
+        }
+
+        // Function to update the status (Approve/Reject)
+        function updateStatus(id, newStatus, rowIndex) {
+            Swal.fire({
+                title: `<h3 class="text-xl font-semibold text-left">บันทึกสถานะ ${newStatus} (เพิ่มเติมความเห็น)</h3>`,
+                input: 'textarea',
+                inputPlaceholder: 'เพิ่มเติม...',
+                showCancelButton: true,
+                confirmButtonText: 'บันทึก',
+                cancelButtonText: 'ยกเลิก',
+                preConfirm: (note) => note
+            }).then(result => {
+                if (result.isConfirmed) {
+                    const note = result.value || '';
+                    const requestData = { id: id, status: newStatus, note: note };
+
+                    // Send the updated status and note to the server
+                    fetch(updateStatusUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestData),
+                        mode: 'no-cors'
+                    })
+                    .then(() => {
+                        Swal.fire('Success', 'Status and note updated successfully', 'success');
+                        document.querySelector(`.status-${rowIndex}`).innerHTML = getStatusIcon(newStatus);
+                        document.querySelector(`.note-${rowIndex}`).textContent = note; // Update the note in the table
+                    })
+                    .catch(error => Swal.fire('Error', 'Failed to update status', 'error'));
+                }
+            });
         }
 
         // View full details in a modal
         function viewDetails(rowIndex, id, name, license, time, status, note) {
-            console.log('Viewing details for:', { id, name, license, time, status, note }); // Debugging info
             Swal.fire({
                 title: `<h3 class="text-xl font-semibold text-left">รายละเอียดคำขอ</h3>`,
                 html: `
@@ -238,11 +243,6 @@
 
         // Fetch data and render table on page load
         fetchDataAndRenderTable();
-
-        // Add event listeners for filter inputs
-        document.getElementById('userFilter').addEventListener('input', filterData);
-        document.getElementById('licenseFilter').addEventListener('input', filterData);
-        document.getElementById('dateFilter').addEventListener('input', filterData);
     </script>
 </body>
 
