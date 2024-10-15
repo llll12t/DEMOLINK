@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Factory Access Requests</title>
+    <!-- Tailwind CSS for styling -->
+    <script src="https://cdn.tailwindcss.com"></script>
+
+    <!-- SweetAlert2 CSS & JS -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/sweetalert2@11/dist/sweetalert2.min.css">
+    <link href="https://fonts.googleapis.com/icon?family=Material+Icons" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+</head>
+
+<body class="bg-gradient-to-tl from-teal-100 from-5% to-blue-200 to-50% flex justify-center items-center min-h-screen">
+
+    <div class="rounded-3xl p-6 max-w-md min-h-screen">
+        <h2 class="text-xl font-bold mb-6 text-gray-800">Administrator</h2>
+        
+        <!-- Input Fields for Search -->
+        <div class="flex space-x-4 mb-6">
+            <input id="userFilter" type="text" placeholder="กรองผู้ใช้" class="border rounded-md p-2 w-full" />
+            <input id="licenseFilter" type="text" placeholder="กรองเลขทะเบียน" class="border rounded-md p-2 w-full" />
+            <input id="dateFilter" type="date" class="border rounded-md p-2" />
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loadingSpinner" class="loading-spinner"></div>
+
+        <!-- Table for data -->
+        <div class="overflow-x-auto hidden" id="tableContainer">
+            <table class="min-w-full table-auto text-sm">
+                <thead class="bg-gray-50">
+                    <tr>
+                        <th class="px-2 py-2">ผู้ใช้</th>
+                        <th class="px-2 py-2">ทะเบียน</th>
+                        <th class="px-2 py-2">เวลา</th>
+                        <th class="px-2 py-2">สถานะ</th>
+                        <th class="px-2 py-2">จัดการ</th>
+                    </tr>
+                </thead>
+                <tbody id="requestTable" class="bg-white text-xs">
+                    <!-- Table rows will be populated dynamically here -->
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Pagination -->
+        <div class="flex justify-center mt-4" id="paginationContainer"></div>
+    </div>
+
+    <script>
+        const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbzqkarMPPocFrSztejI7Y1_XrNCMNspFbDjaDTe8zdQCIjOaHVP8hyHm82xDJSumeou/exec';
+        const sheetDataUrl = `${WEB_APP_URL}?action=getData`;
+        const updateStatusUrl = `${WEB_APP_URL}?action=updateStatus`;
+
+        let requestData = [];
+        let filteredData = [];
+        let currentPage = 1;
+        const rowsPerPage = 10;
+
+        // Fetch data from Google Sheets and populate the table
+        function fetchDataAndRenderTable() {
+            document.getElementById('loadingSpinner').style.display = 'block';
+
+            fetch(sheetDataUrl)
+                .then(response => response.json())
+                .then(data => {
+                    requestData = data.slice(1); // Skip header row
+                    console.log(requestData); // Check the data structure
+                    filteredData = requestData; // Set filteredData to the full dataset initially
+                    renderTable(filteredData);
+                    renderPagination(filteredData);
+                    
+                    document.getElementById('loadingSpinner').style.display = 'none';
+                    document.getElementById('tableContainer').classList.remove('hidden');
+                })
+                .catch(error => {
+                    console.error('Error fetching data:', error);
+                    document.getElementById('loadingSpinner').style.display = 'none';
+                });
+        }
+
+        // Function to filter data based on inputs
+        function filterData() {
+            const userFilterValue = document.getElementById('userFilter').value.toLowerCase();
+            const licenseFilterValue = document.getElementById('licenseFilter').value.toLowerCase();
+            const dateFilterValue = document.getElementById('dateFilter').value;
+
+            filteredData = requestData.filter(row => {
+                const userName = row[1] ? row[1].toLowerCase() : ''; // Ensure row[1] exists
+                const licensePlate = row[2] ? row[2].toLowerCase() : ''; // Ensure row[2] exists
+                const dateValue = row[6] ? row[6].split('T')[0] : ''; // Ensure row[6] exists
+
+                const matchesUser = userFilterValue === '' || userName.includes(userFilterValue); // Match only if search is not empty
+                const matchesLicense = licenseFilterValue === '' || licensePlate.includes(licenseFilterValue); // Match only if search is not empty
+                const matchesDate = dateFilterValue === '' || dateValue === dateFilterValue; // Match only if date is selected
+
+                return matchesUser && matchesLicense && matchesDate;
+            });
+
+            currentPage = 1; // Reset to first page after filtering
+            renderTable(filteredData);
+            renderPagination(filteredData);
+        }
+
+        // Render the table with paginated data
+        function renderTable(data) {
+            const tableBody = document.getElementById('requestTable');
+            tableBody.innerHTML = ''; // Clear existing rows
+
+            // Determine the range of rows to show on the current page
+            const start = (currentPage - 1) * rowsPerPage;
+            const end = start + rowsPerPage;
+            const paginatedData = data.slice(start, end);
+
+            paginatedData.forEach((row, index) => {
+                const formattedCheckIn = formatTimeFromISO(row[6]); // Check-in time
+                const timeRange = formattedCheckIn;
+                const note = row[11] || ''; // Note column
+                const status = row[10]; // Status column
+
+                const tr = document.createElement('tr');
+                tr.classList.add('border-b', 'text-center');
+
+                tr.innerHTML = `
+                    <td class="px-2 py-1">${row[1]}</td> <!-- User name -->
+                    <td class="px-2 py-1">${row[2]}</td> <!-- License plate -->
+                    <td class="px-2 py-1">${timeRange}</td> <!-- Time range -->
+                    <td class="px-2 py-1 status-${index}">${getStatusIcon(status)}</td> <!-- Status with icon -->
+                    <td class="px-2 py-1 text-center flex justify-between">
+                        <button class="bg-green-500 text-white m-1 p-2 rounded-md hover:bg-green-600" onclick="updateStatus(${row[0]}, 'อนุมัติ', ${index})">
+                            <span class="material-icons text-sm">check_circle</span>
+                        </button>
+                        <button class="bg-red-500 text-white m-1 p-2 rounded-md hover:bg-red-600" onclick="updateStatus(${row[0]}, 'ไม่อนุมัติ', ${index})">
+                            <span class="material-icons text-sm">cancel</span>
+                        </button>
+                        <button class="bg-gray-500 text-white m-1 p-2 rounded-md hover:bg-gray-600" onclick="viewDetails(${index}, ${row[0]}, '${row[1]}', '${row[2]}', '${formattedCheckIn}', '${status}', '${note}')">
+                             <span class="material-icons text-sm">search</span>
+                        </button>
+                    </td>
+                `;
+                tableBody.appendChild(tr);
+            });
+        }
+
+        // Function to convert status to icon
+        function getStatusIcon(status) {
+            if (status === 'อนุมัติ') {
+                return `<span class="material-icons text-green-500">check_circle</span>`;
+            } else if (status === 'ไม่อนุมัติ') {
+                return `<span class="material-icons text-red-500">cancel</span>`;
+            } else if (status === 'รอการอนุมัติ') {
+                return `<span class="material-icons text-gray-500">hourglass_empty</span>`;
+            }
+            return status;
+        }
+
+        // Render pagination controls
+        function renderPagination(data) {
+            const paginationContainer = document.getElementById('paginationContainer');
+            paginationContainer.innerHTML = '';
+
+            const totalPages = Math.ceil(data.length / rowsPerPage);
+            const maxVisiblePages = 3;
+            let startPage = Math.max(currentPage - Math.floor(maxVisiblePages / 2), 1);
+            let endPage = Math.min(startPage + maxVisiblePages - 1, totalPages);
+
+            if (endPage - startPage + 1 < maxVisiblePages && totalPages >= maxVisiblePages) {
+                startPage = Math.max(endPage - maxVisiblePages + 1, 1);
+            }
+
+            // Create "First" button
+            const firstButton = document.createElement('button');
+            firstButton.innerHTML = 'หน้าสุด';
+            firstButton.classList.add('px-2', 'py-1', 'bg-gray-200', 'mx-1');
+            firstButton.disabled = currentPage === 1;
+            firstButton.onclick = () => goToPage(1);
+            paginationContainer.appendChild(firstButton);
+
+            // Create page number buttons
+            for (let i = startPage; i <= endPage; i++) {
+                const pageButton = document.createElement('button');
+                pageButton.innerHTML = i;
+                pageButton.classList.add('px-2', 'py-1', 'bg-gray-200', 'mx-1');
+                if (i === currentPage) {
+                    pageButton.classList.add('bg-blue-500', 'text-white');
+                }
+                pageButton.onclick = () => goToPage(i);
+                paginationContainer.appendChild(pageButton);
+            }
+
+            // Create "Last" button
+            const lastButton = document.createElement('button');
+            lastButton.innerHTML = 'หน้าหลังสุด';
+            lastButton.classList.add('px-2', 'py-1', 'bg-gray-200', 'mx-1');
+            lastButton.disabled = currentPage === totalPages;
+            lastButton.onclick = () => goToPage(totalPages);
+            paginationContainer.appendChild(lastButton);
+        }
+
+        // Go to a specific page
+        function goToPage(page) {
+            currentPage = page;
+            renderTable(filteredData);
+            renderPagination(filteredData);
+        }
+
+        // View full details in a modal
+        function viewDetails(rowIndex, id, name, license, time, status, note) {
+            console.log('Viewing details for:', { id, name, license, time, status, note }); // Debugging info
+            Swal.fire({
+                title: `<h3 class="text-xl font-semibold text-left">รายละเอียดคำขอ</h3>`,
+                html: `
+                    <div class="border p-4 rounded-lg bg-gray-50">
+                        <p><strong>ผู้ใช้:</strong> <span>${name}</span></p>
+                        <p><strong>ทะเบียน:</strong> <span>${license}</span></p>
+                        <p><strong>เวลา:</strong> <span>${time}</span></p>
+                        <p><strong>สถานะ:</strong> <span>${status}</span></p>
+                        <p><strong>หมายเหตุ:</strong> <span>${note}</span></p>
+                    </div>
+                `,
+                showCloseButton: true,
+                showConfirmButton: false
+            });
+        }
+
+        // Helper function to format time from ISO datetime string
+        function formatTimeFromISO(isoString) {
+            const time = new Date(isoString);
+            const hours = String(time.getHours()).padStart(2, '0');
+            const minutes = String(time.getMinutes()).padStart(2, '0');
+            return `${hours}:${minutes}`;
+        }
+
+        // Fetch data and render table on page load
+        fetchDataAndRenderTable();
+
+        // Add event listeners for filter inputs
+        document.getElementById('userFilter').addEventListener('input', filterData);
+        document.getElementById('licenseFilter').addEventListener('input', filterData);
+        document.getElementById('dateFilter').addEventListener('input', filterData);
+    </script>
+</body>
+
+</html>
